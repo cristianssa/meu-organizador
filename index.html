@@ -2,6 +2,15 @@
 <html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Meu Organizador</title>
+<meta name="description" content="Treino, dieta, água, finanças, estudo, XP e missões">
+<meta name="theme-color" content="#d4500a">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Organizador">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&display=swap">
 <style>
 :root{--bg:#fff4dc;--sf:#fffdf7;--sf2:#fff0cf;--tx:#2b1708;--mu:#7b5a40;--bd:#ebcf9f;--ac:#d4500a;--ac2:#ffe5c0;--gd:#b6760f;--wr:#b3261e;--ag:#1c7d92;--on:#fff;--sun:rgba(255,184,60,.5);--flame:rgba(224,96,18,.12);--glow:rgba(212,80,10,.16);box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -81,7 +90,7 @@ if((S.v||0)<3){const mp=[0,0,1,2,3];Object.keys(S.meals||{}).forEach(d=>S.meals[
 if((S.v||0)<4){if(!S.foods)S.foods=structuredClone(FOODS);S.v=4}
 if((S.v||0)<5){S.sess=null;if(S.tv=='sessao')S.tv='home';S.wlog=S.wlog||{};Object.keys(S.water||{}).forEach(d=>{if(S.water[d]>0&&!(S.wlog[d]&&S.wlog[d].length))S.wlog[d]=[{t:'',ml:S.water[d]}]});S.wakeFrom=S.wakeFrom||'06:00';S.wakeTo=S.wakeTo||'22:00';S.v=5}
 if((S.v||0)<6){S.eSes=S.eSes||[];S.eTop=S.eTop||{};S.eQ=S.eQ||[];S.eRed=S.eRed||[];S.eArt=S.eArt||[];S.eGone=S.eGone||[];S.eCfg=S.eCfg||{dm:90,wh:12};eSeed();S.v=6}}
-/* ---- sincronização ---- */
+/* ---- armazenamento ---- */
 const UI=['tab','tv','dv','dm','mealDay','pe','gx','gm','kp','fq','wc','cpc','cpe','ddc','fdc','cc','dc','finMonth','ev','ed','etr','emt','emt2','eac'];
 const stab=v=>Array.isArray(v)?v.map(stab):v&&typeof v=='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,stab(v[k])])):v;
 const nonEmpty=a=>Array.isArray(a)?a.length>0:!!a&&Object.keys(a).length>0;
@@ -91,39 +100,28 @@ function fpOf(x){const keep=S;S={...structuredClone(DEF),...x};mig();const f=dst
 const BLANK=fpOf({});
 mig();S.mealDay=td();
 let shSt='off',shT=0,shR='',shMsg='',shTm=null,shBusy=false,shAgain=false,shLast='';
-let seen=dstr(),sy='chk',syT=0,syR='',syP='',syTo=null,dbDoc=null,loaded=false,dirty=false,inflight=false,tm=null;
+/* Os dados ficam só neste aparelho: localStorage (leitura rápida na abertura) + IndexedDB (cópia mais durável e sem o limite de ~5 MB). */
+let seen=dstr(),sy='chk',syT=0,syR='',loaded=false,lsOk=true,tm=null,idbP=null;
 function hideLd(){const e=document.getElementById('ld');if(e)e.style.display='none'}
 function cnt(){const dd=new Set([...Object.keys(S.meals||{}).filter(d=>nonEmpty(S.meals[d])),...Object.keys(S.water||{}).filter(d=>S.water[d]>0)]);return (S.hist||[]).length+' treino(s) · '+dd.size+' dia(s) de dieta'}
 function updSy(){const e=document.getElementById('sync');if(!e)return;
-const m={chk:'Sincronização: verificando…',off:'Sincronização indisponível: os dados ficam só neste aparelho.',pend:'☁ Salvando na nuvem…',ok:'☁ Sincronizado às '+new Date(syT).toTimeString().slice(0,5),err:'⚠ Falha ao sincronizar: os dados estão salvos neste aparelho.'}[sy]||'',bad=sy=='off'||sy=='err';
-e.innerHTML=esc(m)+`<br><span>Neste aparelho: ${esc(cnt())}</span>`+(bad?`<br><span>Motivo: ${esc(syR||'–')}${syP?' · permissão da nuvem: '+esc(syP):''}</span><br><button class="b g" onclick="syRetry()">Tentar de novo</button> <button class="b g" onclick="syPerm()">Abrir permissões</button>`:(loaded?`<br><button class="b g" onclick="pull(true)">Atualizar da nuvem</button>`:''))+shFoot()}
-async function syFail(st,r){sy=st;syR=r;updSy();try{const p=await claude.use('permissions');if(p){syP=await p.state('db');updSy()}}catch(e){}}
-async function syPerm(){try{const p=await claude.use('permissions');if(p){await p.manage();syP=await p.state('db')}}catch(e){syR='o painel não abriu: use o menu Permissões da página'}updSy();syRetry()}
-function syRetry(){sy='chk';syR='';updSy();initSync()}
-function save(){const c=dstr();if(c!==seen){S.dts=Date.now();seen=c;dirty=true}try{localStorage.setItem('org1',JSON.stringify(S))}catch(e){}schedPush();schedSheet()}
-function schedPush(){clearTimeout(tm);if(!dirty||!loaded)return;tm=setTimeout(push,600)}
-async function push(){if(!dbDoc||!loaded||!dirty||inflight)return;inflight=true;sy='pend';updSy();const snap=dstr();
-try{await dbDoc.set({json:JSON.stringify(dataObj())});if(dstr()===snap)dirty=false;sy='ok';syT=Date.now()}catch(e){sy='err';syR=(e&&(e.code||e.message))||'erro'}
-inflight=false;updSy();if(dirty&&sy=='ok')schedPush()}
-function adopt(R){const ui={},osh=S.sheet;UI.forEach(k=>{if(k in S)ui[k]=S[k]});S={...structuredClone(DEF),...R,...ui};if(osh&&osh.url&&!(S.sheet&&S.sheet.url))S.sheet=osh;mig();seen=dstr();dirty=false;try{localStorage.setItem('org1',JSON.stringify(S))}catch(e){}schedSheet()}
-const parseR=sn=>{if(!sn||!sn.exists)return null;const R=JSON.parse(sn.data().json);R.dts=R.dts||R.ts||0;return R};
-async function loadCloud(){const R=parseR(await dbDoc.get());let ad=false;const lb=dstr()==BLANK;
-if(R&&fpOf(R)!=BLANK){if(fpOf(R)==dstr()){dirty=false}else if(lb||(R.dts||0)>(S.dts||0)){adopt(R);ad=true}else dirty=true}
-else if(!lb)dirty=true;
-loaded=true;if(!dirty){sy='ok';syT=Date.now()}hideLd();if(ad)render();else updSy();schedPush();schedSheet()}
-async function pull(manual){if(!dbDoc||!loaded||dirty||inflight)return;const ae=document.activeElement;if(!manual&&ae&&/INPUT|TEXTAREA|SELECT/.test(ae.tagName||''))return;
-try{const R=parseR(await dbDoc.get());if(R&&!dirty&&fpOf(R)!=BLANK&&fpOf(R)!=dstr()&&(R.dts||0)>(S.dts||0)){adopt(R);render()}sy='ok';syT=Date.now();updSy()}catch(e){if(manual){sy='err';syR=(e&&(e.code||e.message))||'erro';updSy()}}}
-async function initSync(){clearTimeout(syTo);syTo=setTimeout(()=>{if(sy=='chk'){syFail('off','sem resposta em 12 s');hideLd()}},12000);
-try{if(!window.claude||typeof claude.use!=='function'){syFail('off','esta tela não oferece nuvem (abra a página do app, não a prévia dentro do chat)');hideLd();return}
-const db=await claude.use('db'),u=await claude.use('user');if(!db||!u){syFail('off','nuvem não liberada nesta tela ou conta não conectada');hideLd();return}
-const id=await u.id();if(!id){syFail('off','sem identificação: entre na sua conta do Claude');hideLd();return}
-dbDoc=db.collection('data/users/'+id).doc('app');await loadCloud()}catch(e){syFail('err',(e&&(e.code||e.message))||'erro desconhecido');hideLd()}}
-setTimeout(hideLd,13000);
-try{document.addEventListener('visibilitychange',()=>{if(!document.hidden){pull();schedPush()}});window.addEventListener('online',()=>{schedPush();pull()});setInterval(()=>{if(!document.hidden)pull()},60000)}catch(e){}
-initSync();
+const m={chk:'Carregando dados deste aparelho…',ok:'💾 Salvo neste aparelho às '+new Date(syT||Date.now()).toTimeString().slice(0,5),err:'⚠ Não consegui salvar: '+(syR||'erro')+'. Baixe um backup agora.'}[sy]||'';
+e.innerHTML=esc(m)+`<br><span>Neste aparelho: ${esc(cnt())}</span>`+(S.lastBk?`<br><span>Último backup: ${esc(fdt(S.lastBk))}</span>`:'<br><span>Os dados ficam só neste aparelho: baixe um backup de vez em quando.</span>')+shFoot()}
+function idb(){if(!idbP)idbP=new Promise((ok,no)=>{try{const r=indexedDB.open('meu-organizador',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)}catch(e){no(e)}});return idbP}
+async function idbGet(k){const d=await idb();return new Promise((ok,no)=>{const q=d.transaction('kv').objectStore('kv').get(k);q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)})}
+async function idbPut(k,v){const d=await idb();return new Promise((ok,no)=>{const t=d.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=()=>ok();t.onerror=()=>no(t.error);t.onabort=()=>no(t.error)})}
+function flush(){clearTimeout(tm);tm=null;const j=JSON.stringify(S);return idbPut('org1',j).then(()=>{if(sy!='ok'){sy='ok';syT=Date.now();updSy()}}).catch(e=>{if(!lsOk){sy='err';syR=(e&&(e.name||e.message))||'espaço cheio';updSy()}})}
+function persist(){try{localStorage.setItem('org1',JSON.stringify(S));lsOk=true;if(loaded){sy='ok';syT=Date.now()}}catch(e){lsOk=false}if(!loaded)return;updSy();clearTimeout(tm);tm=setTimeout(flush,300)}
+function save(){const c=dstr();if(c!==seen){S.dts=Date.now();seen=c}persist();schedSheet()}
+function adopt(R){const ui={},osh=S.sheet;UI.forEach(k=>{if(k in S)ui[k]=S[k]});S={...structuredClone(DEF),...R,...ui};if(osh&&osh.url&&!(S.sheet&&S.sheet.url))S.sheet=osh;mig();seen=dstr();persist();schedSheet()}
+async function initLocal(){try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{})}catch(e){}
+let ad=false;try{const j=await Promise.race([idbGet('org1'),new Promise(r=>setTimeout(()=>r(null),3000))]);if(j){const R=JSON.parse(j);if(fpOf(R)!=BLANK&&(dstr()==BLANK||(R.dts||0)>(S.dts||0))){adopt(R);ad=true}}}catch(e){}
+loaded=true;sy=lsOk?'ok':sy;syT=Date.now();hideLd();if(ad)render();else updSy();flush();schedSheet()}
+setTimeout(hideLd,5000);
+try{document.addEventListener('visibilitychange',()=>{if(document.hidden&&tm)flush()});window.addEventListener('pagehide',()=>{if(tm)flush()});window.addEventListener('online',()=>{if(shOn()&&shSt=='wait')shSend(false)})}catch(e){}
+initLocal();
 /* ---- espelho na planilha (Google Sheets via conector) ---- */
 const hasData=()=>(S.hist||[]).length>0||(S.cardio||[]).length>0||(S.fin||[]).length>0||(S.eSes||[]).length>0||(S.eArt||[]).length>0||Object.keys(S.eTop||{}).length>0||Object.values(S.meals||{}).some(nonEmpty)||Object.values(S.water||{}).some(v=>v>0);
-function shOn(){return !!(S.sheet&&S.sheet.on)}
 function sheetRows(){const mn=S.mealNames||[],dn=k=>(S.diet&&S.diet[k]?S.diet[k].n:''),R={Treino:[],Cardio:[],Dieta:[],Dieta_Dia:[],Agua:[],Agua_Horarios:[],Heroi:[],Estudo_Sessoes:[],Estudo_Materias:[],Estudo_Topicos:[],Estudo_Questoes:[],Estudo_Redacoes:[],Mestrado_Tarefas:[],Mestrado_Artigos:[],Alimentos:[],Plano_Treino:[],Plano_Dieta:[],Financas:[],Config:[]};
 (S.hist||[]).slice().reverse().forEach((h,hi)=>(h.ex||[]).forEach(e=>(e.sets||[]).forEach((q,j)=>{if(q&&+q.r>0){const w=+q.w||0;R.Treino.push([h.date,h.t0||'',h.t1||'',h.min||'',h.day,e.n,j+1,+q.r,w,+q.r*w])}})));
 (S.cardio||[]).slice().reverse().forEach((c,i)=>R.Cardio.push([c.date,c.h||'',c.t,+c.m||0,+c.km||'']));
@@ -145,50 +143,48 @@ DISC.forEach(d=>{const st=dStat(d.id);R.Estudo_Materias.push([d.n,d.q,d.p,d.q*d.
 (S.fin||[]).forEach(x=>R.Financas.push([x.d,x.t,x.n,x.c||'',x.v,x.cd||'',x.p?'Sim':'Não',x.s?'Sim':'Não']));
 gRows().forEach(r=>R.Heroi.push(r));R.Config.push(['meta_agua_ml',S.waterGoal||''],['dieta_padrao',dn(S.defPlan||'A')],['proximo_treino',(S.split[S.next]||{}).n||'']);
 return R}
-const SID='14Ny4AtbQ6bM47l1rU4FdqGM9P8zP7KQrKbtNHsqcb_E',GS='Google Sheets';
 const HDR={Treino:['Data','Início','Fim','Min','Treino','Exercício','Série','Reps','Carga (kg)','Volume (kg)'],Cardio:['Data','Horário','Tipo','Minutos','Km'],Dieta:['Data','Refeição','Horário','Alimento','Quantidade','Kcal'],Dieta_Dia:['Data','Refeição','Situação','Dieta do dia','Observação'],Agua:['Data','Total ml','Meta ml'],Agua_Horarios:['Data','Horário','ml'],Alimentos:['Alimento','Kcal','Base','Unidade','Gramas/unid.'],Plano_Treino:['Treino','Ordem','Exercício','Séries'],Plano_Dieta:['Dieta','Refeição','Item','Descrição'],Estudos:['Data','Matéria','Tópico','Minutos/Etapa','Obs','Status'],Financas:['Data','Tipo','Descrição','Categoria','Valor','Cartão','Parcelado','Pago'],Config:['Chave','Valor'],Heroi:['Item','Valor'],Estudo_Sessoes:['Data','Início','Fim','Minutos','Trilha','Matéria ou atividade','Tipo','Minutos efetivos'],Estudo_Materias:['Matéria','Questões na prova','Peso','Pontos','Tópicos estudados','Total de tópicos','% estudado','Questões feitas','Acertos','% de acerto'],Estudo_Topicos:['Matéria','Tópico','Status','Estudado em','Revisões','Próxima revisão'],Estudo_Questoes:['Data','Matéria','Feitas','Acertos','% de acerto','Tipo'],Estudo_Redacoes:['Data','Tema','Nota'],Mestrado_Tarefas:['Tipo','Tarefa','Prazo','Concluída em'],Mestrado_Artigos:['Data','Título']};
 const OPT=['Financas','Alimentos'];
-function mcpErr(e){const c=e&&e.code;return {not_in_manifest:'permissão negada: toque em "Conectar planilha" e permita o acesso ao Google Sheets',approval_required:'falta aprovar o acesso: toque em "Conectar planilha"',consent_required:'falta aprovar o acesso: toque em "Conectar planilha"',needs_reauth:'reconecte o Google Sheets em claude.ai › Configurações › Conectores',server_not_connected:'o conector Google Sheets não está conectado à sua conta (claude.ai › Configurações › Conectores)',selection_required:'você tem mais de um conector Google Sheets; escolha um quando o Claude perguntar',blocked_by_policy:'sua organização bloqueou este conector',server_unavailable:'Google indisponível agora; tentarei de novo na próxima alteração',upstream_error:'falha ao falar com o Google; tentarei de novo na próxima alteração',not_granted:'esta tela não tem acesso a conectores (abra pelo link da página do app)',capability_disabled:'esta tela não tem acesso a conectores (abra pelo link da página do app)',tool_error:'o Google recusou: '+String(e&&e.message||'').slice(0,160)}[c]||String(e&&e.message||e)}
-async function gsCall(m,tool,input){const r=await m.callTool(GS,tool,{spreadsheetId:SID,...input});return r&&(r.payload!==undefined?r.payload:r)}
-async function shRun(R){const m=await claude.use('mcp');if(!m)throw {code:'not_granted',message:''};
-const info=await gsCall(m,'get_spreadsheet',{fields:['sheets.properties.title']});const sh=(info&&(info.sheets||(info.content&&info.content.sheets)))||[];const have=new Set(sh.map(x=>x.properties&&x.properties.title));
-const tabs=Object.keys(HDR).filter(t=>have.has(t)||R[t].length||!OPT.includes(t));
-const add=tabs.filter(t=>!have.has(t));
-if(add.length){await gsCall(m,'update_spreadsheet',{requests:add.map(t=>({addSheet:{properties:{title:t,gridProperties:{frozenRowCount:1}}}}))})}
-const out={};
-for(const t of tabs){if(OPT.includes(t)&&!R[t].length&&!have.has(t))continue;
-await gsCall(m,'batch_clear_values',{ranges:[t+'!A:Z']});
-await gsCall(m,'update_values',{range:t+'!A1',values:[HDR[t],...R[t]]});out[t]=R[t].length}
-return out}
+/* Planilha: o app envia as linhas (POST) para um Apps Script instalado pelo usuário na planilha dele (ver apps-script/Codigo.gs). */
+function shOn(){return !!(S.sheet&&S.sheet.on&&S.sheet.url)}
+async function shRun(R){const c=S.sheet,body=JSON.stringify({key:c.key||'',hdr:HDR,opt:OPT,rows:R});let r;
+try{r=await fetch(c.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body,redirect:'follow'})}
+catch(e){if(!navigator.onLine)throw {code:'offline'};await fetch(c.url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body});return null}
+let o=null;try{o=await r.json()}catch(e){throw {message:'a URL não respondeu como o script do app (confira se copiou a URL do "App da Web" que termina em /exec)'}}
+if(!o||!o.ok)throw {message:'o script recusou: '+String(o&&o.erro||'erro desconhecido').slice(0,160)};return o.tabs||{}}
 function schedSheet(){clearTimeout(shTm);if(!shOn()||!loaded)return;shTm=setTimeout(()=>shSend(false),4000)}
 async function shSend(manual){if(!shOn())return;if(!hasData()){if(manual){shSt='err';shR='ainda não há registros para enviar (a planilha não é alterada com o app vazio)';updSy();if(S.tab=='cfg')render()}return}
 if(shBusy){shAgain=true;return}
 const R=sheetRows(),fp=JSON.stringify(R);if(!manual&&fp===shLast)return;
+if(!navigator.onLine){shSt='wait';updSy();if(S.tab=='cfg')render();return}
 shBusy=true;shSt='pend';shR='';updSy();
-try{const o=await shRun(R);shLast=fp;shSt='ok';shT=Date.now();shMsg='Enviado: '+Object.entries(o).filter(([,n])=>n>0).map(([k,n])=>k+' '+n).join(' · ')}
-catch(e){shSt='err';shR=mcpErr(e)}
+try{const o=await shRun(R);shLast=fp;shSt='ok';shT=Date.now();shMsg=o?'Enviado: '+Object.entries(o).filter(([,n])=>n>0).map(([k,n])=>k+' '+n).join(' · '):'Enviado (o Google não devolveu confirmação: confira a planilha).'}
+catch(e){if(e&&e.code=='offline')shSt='wait';else{shSt='err';shR=String(e&&e.message||e)}}
 shBusy=false;updSy();if(S.tab=='cfg')render();if(shAgain){shAgain=false;schedSheet()}}
-function shLine(){return {off:'Planilha: não configurada',pend:'📄 Enviando para a planilha…',ok:'📄 Planilha atualizada às '+new Date(shT).toTimeString().slice(0,5),err:'⚠ Planilha: '+shR}[shOn()?(shSt=='off'?'ok0':shSt):'off']||(shOn()?'📄 Planilha configurada: envia após a próxima alteração':'')}
+function shLine(){return {off:'Planilha: não configurada',pend:'📄 Enviando para a planilha…',wait:'📄 Sem internet: envio para a planilha quando a conexão voltar',ok:'📄 Planilha atualizada às '+new Date(shT).toTimeString().slice(0,5),err:'⚠ Planilha: '+shR}[shOn()?(shSt=='off'?'ok0':shSt):'off']||(shOn()?'📄 Planilha configurada: envia após a próxima alteração':'')}
 function shFoot(){return `<br><span>${esc(shLine())}</span> <button class="b g" style="padding:2px 8px;font-size:12px" onclick="go('cfg')">📄 Planilha e backup</button>`}
-async function shSave(){shMsg='';shSt='pend';shR='';render();
-try{const p=await claude.use('permissions');if(p){const r=await p.request(['mcp:'+GS]);const v=r&&(r['mcp:'+GS]||r);if(v=='denied'){S.sheet={on:false};save();shSt='err';shR='você não permitiu o acesso ao Google Sheets';render();return}}}catch(e){}
-S.sheet={on:true};save();shLast='';shSend(true)}
-function shOff(){S.sheet={on:false};shSt='off';save();render()}
+function shSave(){const u=(($('#shUrl')||{}).value||'').trim(),k=(($('#shKey')||{}).value||'').trim();shMsg='';
+if(!/^https:\/\/script\.google(usercontent)?\.com\/.+/.test(u)){shSt='err';shR='cole a URL do App da Web do Apps Script (começa com https://script.google.com/)';render();return}
+S.sheet={on:true,url:u,key:k};save();shLast='';shSend(true)}
+function shOff(){S.sheet={...(S.sheet||{}),on:false};shSt='off';save();render()}
 let bkMsg='';
 const bkJson=()=>JSON.stringify({app:'meu-organizador',v:1,exportado:new Date().toISOString(),data:dataObj()});
-async function expData(){const j=bkJson(),fn='meu-organizador-backup-'+td()+'.json';try{const dl=(window.claude&&typeof claude.use=='function')?await claude.use('downloads'):null;
-if(dl){await dl.save({filename:fn,data:j});bkMsg='Backup salvo ('+cnt()+').'}
-else{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([j],{type:'application/json'}));a.download=fn;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);bkMsg='Backup gerado ('+cnt()+'). Se o download não começar, use "Copiar dados".'}}
-catch(e){bkMsg=e&&e.code=='declined'?'Download cancelado.':'O download não funcionou aqui: use "Copiar dados".'}render()}
-async function expCopy(){const j=bkJson();try{await navigator.clipboard.writeText(j);bkMsg='Dados copiados ('+cnt()+'). Cole num bloco de notas ou num e-mail para guardar.';render()}catch(e){bkMsg='Não deu para copiar sozinho: o texto está na caixa abaixo. Selecione tudo e copie.';render();const t=document.getElementById('impTx');if(t){t.value=j;t.focus();t.select()}}}
+function bkDone(){S.lastBk=td();save()}
+async function expData(){const j=bkJson(),fn='meu-organizador-backup-'+td()+'.json';try{
+const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([j],{type:'application/json'}));a.download=fn;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);bkDone();bkMsg='Backup gerado ('+cnt()+'). Se o download não começar, use "Copiar dados".'}
+catch(e){bkMsg='O download não funcionou aqui: use "Copiar dados".'}render()}
+async function expCopy(){const j=bkJson();try{await navigator.clipboard.writeText(j);bkDone();bkMsg='Dados copiados ('+cnt()+'). Cole num bloco de notas ou num e-mail para guardar.';render()}catch(e){bkMsg='Não deu para copiar sozinho: o texto está na caixa abaixo. Selecione tudo e copie.';render();const t=document.getElementById('impTx');if(t){t.value=j;t.focus();t.select()}}}
 function impObj(R){const d=R&&typeof R=='object'?(R.data||R):null;if(!d||!(d.split||d.hist||d.meals||d.fin)){bkMsg='Esse conteúdo não parece um backup do Meu Organizador.';render();return}
 adopt(d);S.dts=Date.now();seen='';save();bkMsg='Dados importados: '+cnt()+'.';render()}
 function impText(){const t=document.getElementById('impTx');try{impObj(JSON.parse((t&&t.value||'').trim()))}catch(e){bkMsg='Não consegui ler o texto colado. Confira se copiou o backup inteiro.';render()}}
 function impFile(inp){const f=inp.files&&inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{impObj(JSON.parse(r.result))}catch(e){bkMsg='Não consegui ler esse arquivo.';render()}};r.readAsText(f)}
 function planilhaScr(){const c=S.sheet||{};
 return `<div class="r sp"><h2>Planilha e backup</h2><button class="b g" onclick="go('treino')">← Voltar</button></div>
-<p class="mu" style="margin:0">Seus registros são copiados para a planilha <b>Meu Organizador – Dados</b>, no seu Google Drive, uma aba por área. A cópia é refeita sozinha, cerca de 4 segundos depois de cada alteração. Não edite as abas à mão: o app reescreve o conteúdo delas.</p>
-<div class="c"><h3>Conexão</h3><button class="b l" onclick="shSave()">${shOn()?'Reconectar planilha':'Conectar planilha'}</button>
+<p class="mu" style="margin:0">Se você ligar a planilha, seus registros são copiados para uma planilha do seu Google Drive, uma aba por área. A cópia é refeita sozinha, cerca de 4 segundos depois de cada alteração (sem internet, ela espera a conexão voltar). Não edite as abas à mão: o app reescreve o conteúdo delas.</p>
+<div class="c"><h3>Conexão</h3>
+<label class="mu">URL do App da Web (Apps Script)</label><input id="shUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(c.url||'')}" style="width:100%;margin:3px 0 6px">
+<label class="mu">Chave (a mesma que está no script)</label><input id="shKey" type="text" autocomplete="off" value="${esc(c.key||'')}" style="width:100%;margin:3px 0 6px">
+<button class="b l" onclick="shSave()">${shOn()?'Salvar e reenviar':'Conectar planilha'}</button>
 ${shOn()?`<button class="b l g" onclick="shOff()">Desligar envio</button>`:''}
 ${shMsg?`<div class="mu">${esc(shMsg)}</div>`:''}${shSt=='err'?`<div class="mu w">⚠ ${esc(shR)}</div>`:''}${shSt=='ok'?`<div class="mu">${esc(shLine())}</div>`:''}</div>
 ${shOn()?`<button class="b l g" onclick="shSend(true)">Enviar agora</button>`:''}
@@ -199,7 +195,12 @@ ${bkMsg?`<div class="mu">${esc(bkMsg)}</div>`:''}
 <input type="file" accept=".json,application/json" onchange="impFile(this)" style="width:100%">
 <textarea id="impTx" placeholder="…ou cole aqui o texto do backup" style="margin-top:6px"></textarea>
 <button class="b l g" onclick="impText()">Importar texto colado</button></div>
-<p class="mu">Ao tocar em <b>Conectar planilha</b>, o Claude pede permissão para o app usar seu conector do Google Sheets. Só funciona abrindo o app pelo link da página (não pela prévia dentro do chat).</p>`}
+<details class="c"><summary><b>Como ligar a planilha (uma vez só)</b></summary><ol class="mu" style="padding-left:18px">
+<li>Crie uma planilha no Google Planilhas (ex.: "Meu Organizador – Dados").</li>
+<li>Nela, abra <b>Extensões › Apps Script</b>, apague o que estiver lá e cole o código do arquivo <b>apps-script/Codigo.gs</b> do repositório do app.</li>
+<li>Troque a chave na linha <b>CHAVE</b> por uma senha só sua e salve.</li>
+<li>Toque em <b>Implantar › Nova implantação</b>, tipo <b>App da Web</b>, "Executar como: eu", "Quem pode acessar: qualquer pessoa". Autorize.</li>
+<li>Copie a URL que termina em <b>/exec</b>, cole acima junto com a chave e toque em <b>Conectar planilha</b>.</li></ol></details>`}
 const T=[['treino','Treino'],['dieta','Dieta'],['estudo','Estudo'],['heroi','Herói']];
 const $=s=>document.querySelector(s);
 function go(t){S.tab=t;save();render()}
@@ -608,4 +609,5 @@ let iv;function render(){updSy();if(!T.some(x=>x[0]==S.tab)&&S.tab!='cfg')S.tab=
 const hv=(S.tab=='treino'&&(S.tv||'home')=='home')||(S.tab=='dieta'&&(S.dv||'home')=='home')||(S.tab=='estudo'&&(S.ev||'home')=='home');$('#app').innerHTML=(hv?hud():'')+{treino,dieta,heroi,fin,estudo,cfg:planilhaScr}[S.tab]();clearInterval(iv);
 if(S.tab=='estudo'&&S.eTimer){const u=()=>{const s=Math.floor((Date.now()-S.eTimer.t0)/1000);const e=$('#clk');if(e)e.textContent=p2(Math.floor(s/3600))+':'+p2(Math.floor(s/60)%60)+':'+p2(s%60)};u();iv=setInterval(u,1000)}}
 render();
+if('serviceWorker' in navigator&&location.protocol!='file:')window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
 </script></body></html>
